@@ -63,9 +63,20 @@ UI_TEXT = {
         "Microphone Booster is already running.\nUse the existing window or the tray icon.",
     ),
     "refreshing": ("در حال بروزرسانی لیست...", "Updating device list..."),
-    "tip_about": ("درباره سازنده", "About developer"),
+    "tip_about": ("راهنمایی", "Help"),
     "tip_lang": ("تغییر زبان", "Change language"),
     "tip_refresh": ("بروزرسانی لیست دستگاه‌ها", "Update device list"),
+    "tip_gate": ("هرچی عدد به صفر نزدیک‌تر باشد صدای پس‌زمینه بیشتر حذف می‌شود",
+                 "The closer the value is to zero, the more background noise is removed."),
+    "about_text": (
+        "برای استفاده از نرم افزار برای بوست میکروفون در سیستم حتما به نرم افزار میکروفون مجازی "
+        "نیاز است که حتما یکبار نصب شود\n"
+        "«برای راهنمایی بیشتر وارد گیت هاب نرم افزار بشوید»",
+        "To use this app for boosting your microphone system-wide, a virtual microphone software "
+        "must be installed once.\n"
+        "\"For more guidance, visit the app's GitHub page.\"",
+    ),
+    "close": ("بستن", "Close"),
 }
 
 
@@ -249,8 +260,6 @@ class AudioEngine:
         self.boost_db = 0.0
         self.volume = 0.9
 
-        self._env = 0.0
-        self._fenv = 0.0
         self._gain_smooth = 1.0
         self._lim_gain = 1.0
         self.in_level = 0.0
@@ -272,9 +281,10 @@ class AudioEngine:
 
     def process(self, indata):
         x_raw = np.ascontiguousarray(indata[:, 0], dtype=np.float32)
+        x = self.hp.process(x_raw)
 
-        # سطح واقعی میکروفون (قبل از نویزگیر) برای نوار وضعیت
-        in_peak = float(np.max(np.abs(x_raw))) if x_raw.size else 0.0
+        # سطح واقعی میکروفون (بعد از حذف بم، قبل از تقویت) برای نوار وضعیت
+        in_peak = float(np.max(np.abs(x))) if x.size else 0.0
         attack = 0.35
         release = 0.05
         if in_peak > self.in_level:
@@ -282,32 +292,27 @@ class AudioEngine:
         else:
             self.in_level += (in_peak - self.in_level) * release
 
-        x = self.hp.process(x_raw)
-
         boost_gain = 10 ** (self.boost_db / 20.0)
         x = x * boost_gain * float(self.volume)
 
         # ۲) نویزگیر (حذف نویز) + تشخیص صدا (حذف صدای اضافه هنگام سکوت)
-        rms = float(np.sqrt(np.mean(np.square(x)) + 1e-12))
-        if rms > self._env:
-            self._env += (rms - self._env) * 0.25
-        else:
-            self._env += (rms - self._env) * 0.02
-        self._fenv = max(self._fenv * 0.995, rms)
+        # آستانه با همان سطحی سنجیده میشود که نوار دسیبل نشان میدهد (in_level)
+        # تا برش دقیقاً روی خط سبز اتفاق بیفتد و تحت تأثیر تقویت نباشد.
         thr = self.gate_threshold
+        env = self.in_level
 
         target = 1.0
         if self.gate_on:
             # نویزگیر: سیگنال‌های پایین‌تر از آستانه را تضعیف می‌کند
-            if self._env >= thr:
+            if env >= thr:
                 target = 1.0
             else:
                 ratio = 2.0
-                target = (self._env / max(thr, 1e-9)) ** ratio
+                target = (env / max(thr, 1e-9)) ** ratio
                 target = min(target, 1.0)
         if self.vad_on:
             # تشخیص صدا: هنگام سکوت (زیر آستانه) صدا کاملاً حذف می‌شود
-            if self._env >= thr:
+            if env >= thr:
                 target = min(target, 1.0)
             else:
                 target = 0.0
@@ -323,7 +328,7 @@ class AudioEngine:
         else:
             self._gain_smooth = 1.0
 
-        self.voice_active = self._fenv >= thr
+        self.voice_active = env >= thr
 
         # ۳) محدودکننده برای جلوگیری از کلیپ
         peak = float(np.max(np.abs(x))) if x.size else 0.0
@@ -753,13 +758,14 @@ class App:
         self.lbl_vol.grid(row=4, column=0, sticky="ew", padx=10, pady=(8, 0))
         self.sc_boost = ttk.Scale(settings, from_=0, to=30, style="Horizontal.TScale",
                                   command=lambda v: self._on_boost(v))
-        self.sc_gate = ttk.Scale(settings, from_=-70, to=-20, style="Horizontal.TScale",
+        self.sc_gate = ttk.Scale(settings, from_=-60, to=-15, style="Horizontal.TScale",
                                  command=lambda v: self._on_gate(v))
         self.sc_vol = ttk.Scale(settings, from_=0, to=1, style="Horizontal.TScale",
                                 command=lambda v: self._on_vol(v))
         self.sc_boost.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10)
         self.sc_gate.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10)
         self.sc_vol.grid(row=5, column=0, columnspan=2, sticky="ew", padx=10)
+        self.tip_gate = ToolTip(self.sc_gate, self._t("tip_gate"), root)
         self.chk_gate = SquareCheck(settings, on_toggle=self._on_checks)
         self.chk_vad = SquareCheck(settings, on_toggle=self._on_checks)
         self.chk_gate.frame.grid(row=6, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 0))
@@ -782,6 +788,8 @@ class App:
         self.meter_cv = tk.Canvas(meter_card, height=18, bg="#0c0c0e", highlightthickness=0)
         self.meter_cv.pack(fill="x", padx=10)
         self.meter_rect = self.meter_cv.create_rectangle(0, 0, 0, 18, fill="#22c55e", outline="")
+        # خط سبز نازک آستانه نویزگیر روی نوار دسیبل (جای آن بر اساس gate_db محاسبه می‌شود)
+        self.meter_gate = self.meter_cv.create_line(0, 1, 0, 17, fill="#4ade80", width=2)
         self.lbl_voice = ttk.Label(meter_card, style="CardDim.TLabel")
         self.lbl_voice.pack(fill="x", padx=10, pady=(4, 10))
         self._static.append((self.lbl_meter, "meter_label"))
@@ -907,6 +915,7 @@ class App:
                 pass
         self.hdr_lang.config(text=self._t("btn_lang"))
         self.tip_about.set_text(self._t("tip_about"))
+        self.tip_gate.set_text(self._t("tip_gate"))
         # نکته دکمه زبان همیشه به زبانی است که فعلاً فعال نیست (زبان مقصد)
         self.tip_lang.set_text("تغییر زبان" if self.lang == "en" else "Change Language")
         self.tip_refresh.set_text(self._t("tip_refresh"))
@@ -1346,7 +1355,19 @@ class App:
                 log_exc("_set_window_icon")
 
     def _show_about(self, event=None):
-        messagebox.showinfo(self._t("app_title"), "Made By N2VID", parent=self.root)
+        card = "#1e2024"
+        dlg = tk.Toplevel(self.root)
+        dlg.title(self._t("app_title"))
+        dlg.configure(bg=card)
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        tk.Label(dlg, text="Made By N2VID", bg=card, fg="#e5e7eb",
+                 font=("Segoe UI", 13, "bold")).pack(padx=24, pady=(16, 8))
+        tk.Label(dlg, text=self._t("about_text"), bg=card, fg="#a1a1aa",
+                 justify="center", wraplength=420, font=("Segoe UI", 11)).pack(padx=24, pady=0)
+        ttk.Button(dlg, style="Accent.TButton", text=self._t("close"),
+                   command=dlg.destroy).pack(pady=(14, 14))
 
     def hide_to_tray(self):
         self.root.withdraw()
@@ -1427,6 +1448,10 @@ class App:
                         self.meter_cv.itemconfig(self.meter_rect, fill="#f59e0b")
                     else:
                         self.meter_cv.itemconfig(self.meter_rect, fill="#22c55e")
+                    # جای خط آستانه نویزگیر: مقیاس دسیبل مشابه نوار (−60 تا −12)
+                    gd = float(self.cfg.get("gate_db", -45))
+                    gx = max(0.0, min(1.0, (gd + 60.0) / 48.0)) * w
+                    self.meter_cv.coords(self.meter_gate, gx, 1, gx, 17)
                 if self.engine and self.engine.running:
                     if self.engine.voice_active:
                         vtxt = self._t("voice_talk")

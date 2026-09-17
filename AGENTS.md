@@ -18,6 +18,7 @@ The UI is a dark-themed, simple window (تقویت‌کننده میکروفون
 ## Key Files
 - `mic_monitor.py` — the entire application (single file; do not split without a reason)
 - `icon.ico` — app/exe icon
+- `version.txt` — EXE Version Info (ProductName, CompanyName=N2VID, v1.1.13)
 - `dist/Microphone Booster.exe` — the built standalone executable (deliverable)
 - `build/` — PyInstaller intermediate output (regenerable)
 - `dist/نحوه_استفاده.txt` — end-user Persian usage guide
@@ -29,8 +30,8 @@ Run from project root `D:\Random Files\Projects\MIC`:
 - Quick audio smoke test (opens mic->speakers for 3 s, prints only active devices and achieved latency): `python mic_monitor.py --test`
 - Launch the GUI: `python mic_monitor.py`
 - Build the EXE:
-  `pyinstaller --noconfirm --onefile --windowed --name "Microphone Booster" --icon icon.ico --add-data "icon.ico;." mic_monitor.py`
-  → output `dist/Microphone Booster.exe`
+  `pyinstaller --noconfirm --onefile --windowed --name "Microphone Booster" --icon icon.ico --version-file version.txt --add-data "icon.ico;." mic_monitor.py`
+  → output `dist/Microphone Booster.exe` (has Version Info: ProductName, CompanyName=N2VID, v1.1.13 from `version.txt`)
 
 ## Architecture (mic_monitor.py)
 - `App` class: builds the tkinter dark UI, tray icon/menu, `after()` polling loop (`_tick`, ~40 ms), worker thread for stream startup, command queue (`queue.Queue`) to marshal events back to the UI thread.

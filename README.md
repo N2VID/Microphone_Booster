@@ -23,6 +23,8 @@ A lightweight Windows desktop app that takes your microphone input, processes it
 - **Speaker test** — a short "ding" to verify the output
 - **Standalone EXE** — built with PyInstaller, no Python needed on the target machine
 
+> **Note:** To use Microphone Booster system-wide, a virtual audio device **must be installed**. We recommend [VB-CABLE](https://vb-audio.com/Cable/).
+
 ## Requirements
 
 - Windows 10 / 11
@@ -85,6 +87,8 @@ Free to use. Made by **N2VID**.
 - **اجرای تک‌نمونه** — اجرای نسخه دوم، پنجره‌ی نسخه اول را به جلو می‌آورد
 - **تست بلندگو** — صدای کوتاه «دینگ» برای بررسی خروجی
 - **EXE مستقل** — ساخته‌شده با PyInstaller؛ بدون نیاز به نصب پایتون روی دستگاه
+
+> **توجه:** برای استفاده از تقویت‌کننده میکروفون در سیستم حتما باید Virtual Audio نصب باشد و برای پیشنهاد می‌توانید از [VB-CABLE](https://vb-audio.com/Cable/) استفاده کنید.
 
 ## طرز استفاده
 
