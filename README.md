@@ -23,8 +23,6 @@ A lightweight Windows desktop app that takes your microphone input, processes it
 - **Speaker test** — a short "ding" to verify the output
 - **Standalone EXE** — built with PyInstaller, no Python needed on the target machine
 
-> **Note:** To use Microphone Booster system-wide, a virtual audio device **must be installed**. We recommend [VB-CABLE](https://vb-audio.com/Cable/).
-
 ## Requirements
 
 - Windows 10 / 11
@@ -46,6 +44,10 @@ python mic_monitor.py
 5. Close-to-tray keeps it running in the background; quit from the tray menu.
 
 The tray icon menu shows the current input/output and lets you show/hide the window, run the speaker test, and quit.
+
+> [!IMPORTANT]
+> **Note:** To use Microphone Booster system-wide, a virtual audio device **must be installed**. We recommend [VB-CABLE](https://vb-audio.com/Cable/).
+> Set your speaker output to **CABLE Input (VB-Audio Virtual Cable)** and select **CABLE Output** as the microphone in the app.
 
 ## Build the EXE
 
