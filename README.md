@@ -2,7 +2,7 @@
 
 A lightweight Windows desktop app that takes your microphone input, processes it **in real time**, and plays it directly to your speakers with low latency.
 
-![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6) ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab) ![DSP: numpy](https://img.shields.io/badge/DSP-numpy-4dabcf)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6) ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab) ![DSP: numpy](https://img.shields.io/badge/DSP-numpy-4dabcf) ![](https://komarev.com/ghpvc/?username=N2VID&color=red)
 
 > Also available in [فارسی](#فارسی)
 
