@@ -16,11 +16,6 @@ A lightweight Windows desktop app that takes your microphone input, processes it
   5. Soft peak limiter to prevent clipping
 - **Input level meter** — shows the real microphone loudness, even when the gate mutes the output
 - **Bilingual UI (Persian/English)** — corner EN/FA button, Persian = RTL layout, English = LTR
-- **Dark themed**, simple single-window interface with system-tray support (close-to-tray, real quit via the tray or the quit button)
-- **Active-device filtering** — disabled / unplugged devices never appear
-- **Auto restart** when you change the mic or speaker, plus a device-list refresh button
-- **Single instance** — launching a second copy brings the existing window to the front
-- **Speaker test** — a short "ding" to verify the output
 - **Standalone EXE** — built with PyInstaller, no Python needed on the target machine
 
 ## Requirements
@@ -40,14 +35,13 @@ python mic_monitor.py
 1. Launch `Microphone Booster.exe` (or `python mic_monitor.py`).
 2. Pick the microphone and the speaker device.
 3. Adjust **Boost** and **Noise Gate Threshold**, turn on the gate / voice-detect checkboxes if you want silent gaps muted.
-4. Click the **ding** button to verify the speaker.
-5. Close-to-tray keeps it running in the background; quit from the tray menu.
+4. Close-to-tray keeps it running in the background; quit from the tray menu.
 
 The tray icon menu shows the current input/output and lets you show/hide the window, run the speaker test, and quit.
 
 > [!IMPORTANT]
 > **Note:** To use Microphone Booster system-wide, a virtual audio device **must be installed**. We recommend [VB-CABLE](https://vb-audio.com/Cable/).
-> Set your speaker output to **CABLE Input (VB-Audio Virtual Cable)** and select **CABLE Output** as the microphone in the app.
+> Set your speaker output to **CABLE Input** and select **CABLE Output** as the microphone in the app.
 
 ## Build the EXE
 
@@ -71,11 +65,11 @@ Free to use. Made by **N2VID**.
 
 # تقویت‌کننده میکروفون (Microphone Booster)
 
-اپلیکیشن سبک ویندوزی که صدای میکروفون شما را **بلادرنگ** پردازش می‌کند و مستقیم با تاخیر کم روی بلندگو پخش می‌کند.
+اپلیکیشن سبک ویندوزی که صدای میکروفون شما را **بدون تاخیر** پردازش می‌کند و مستقیم با تاخیر کم روی بلندگو پخش می‌کند.
 
 ## امکانات
 
-- **پردازش صدای بلادرنگ** داخل callback صدا:
+- **پردازش صدای بدون تاخیر** داخل callback صدا:
   1. فیلتر بالاگذر (۹۰ هرتز) برای حذف صدای بم / نویز پایه
   2. افزودنی تقویت صدا و حجم خروجی
   3. نویزگیر با گسترش‌دهنده (شیب نرمِ صدا، بدون نویز زیپری)
@@ -83,11 +77,6 @@ Free to use. Made by **N2VID**.
   5. محدودکننده نرم برای جلوگیری از کلیپینگ
 - **نوار میزان ورودی** — بلندی واقعی میکروفون را نشان می‌دهد حتی وقتی نویزگیر خروجی را قطع کرده
 - **رابط دوزبانه (فارسی/انگلیسی)** — دکمه‌ی EN/FA؛ فارسی = راست‌چین، انگلیسی = چپ‌چین
-- **تم تیره**، تک‌پنجره‌ی ساده با پشتیبانی نوار وظیفه (بستن = مخفی شدن، خروج واقعی از منوی نوار وظیفه یا دکمه خروج)
-- **فیلتر دستگاه‌های غیرفعال** — دستگاه‌های خاموش/جدا‌شده نمایش داده نمی‌شوند
-- **راه‌اندازی مجدد خودکار** هنگام تغییر میکروفون/بلندگو + دکمه بروزرسانی لیست دستگاه‌ها
-- **اجرای تک‌نمونه** — اجرای نسخه دوم، پنجره‌ی نسخه اول را به جلو می‌آورد
-- **تست بلندگو** — صدای کوتاه «دینگ» برای بررسی خروجی
 - **EXE مستقل** — ساخته‌شده با PyInstaller؛ بدون نیاز به نصب پایتون روی دستگاه
 
 ## طرز استفاده
@@ -95,12 +84,11 @@ Free to use. Made by **N2VID**.
 1. `Microphone Booster.exe` را اجرا کنید (یا `python mic_monitor.py`).
 2. دستگاه میکروفون و بلندگو را انتخاب کنید.
 3. «تقویت صدا» و «آستانه نویزگیر» را تنظیم کنید؛ برای قطع سکوت، چک‌باکس‌های نویزگیر/تشخیص صدا را روشن کنید.
-4. با دکمه «دینگ» خروجی را تست کنید.
-5. بستن پنجره برنامه را در نوار وظیفه نگه می‌دارد؛ خروج واقعی از منوی نوار وظیفه.
+4. بستن پنجره برنامه را در نوار وظیفه نگه می‌دارد؛ خروج واقعی از منوی نوار وظیفه.
 
 > [!IMPORTANT]
 > **توجه:** برای استفاده از تقویت‌کننده میکروفون در سیستم حتما باید Virtual Audio نصب باشد و برای پیشنهاد می‌توانید از [VB-CABLE](https://vb-audio.com/Cable/) استفاده کنید.
-> باید خروجی بلندگو را روی **CABLE Input (VB-Audio Virtual Cable)** قرار دهید و در نرم افزار میکروفون **CABLE Output** انتخاب شود
+> باید خروجی بلندگو را روی **CABLE Input** قرار دهید و در نرم افزار میکروفون **CABLE Output** انتخاب شود
 
 ## ساخت EXE
 
