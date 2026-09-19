@@ -6,6 +6,10 @@ A lightweight Windows desktop app that takes your microphone input, processes it
 
 > Also available in [فارسی](#فارسی)
 
+English             |  پارسی
+:-------------------------:|:-------------------------:
+![](ScreenShots/English.png)  |  ![](ScreenShots/Farsi.png)
+
 ## Features
 <a class="button"
        href="https://github.com/N2VID/Microphone_Booster/releases">
