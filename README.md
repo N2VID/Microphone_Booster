@@ -7,7 +7,10 @@ A lightweight Windows desktop app that takes your microphone input, processes it
 > Also available in [فارسی](#فارسی)
 
 ## Features
-
+<a class="button"
+       href="https://github.com/N2VID/Microphone_Booster/releases">
+        Download Page
+    </a>
 - **Real-time DSP chain** inside the audio callback:
   1. High-pass filter (90 Hz) to remove rumble / DC bumps
   2. Boost gain + output volume
@@ -62,7 +65,10 @@ Free to use. Made by **N2VID**.
 ---
 
 ## فارسی
-
+<a class="button"
+       href="https://github.com/N2VID/Microphone_Booster/releases">
+        صفحه دانلود
+    </a>
 # تقویت‌کننده میکروفون (Microphone Booster)
 
 اپلیکیشن سبک ویندوزی که صدای میکروفون شما را **بدون تاخیر** پردازش می‌کند و مستقیم با تاخیر کم روی بلندگو پخش می‌کند.
