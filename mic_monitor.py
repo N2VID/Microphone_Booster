@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import messagebox, ttk
 
 import numpy as np
@@ -27,6 +28,7 @@ from PIL import Image, ImageDraw
 
 APP_NAME = "Microphone Booster"
 APP_TITLE = "Microphone Booster"
+APP_VERSION = "1.6.22"
 
 # --------------------------------------------------------------------------
 # ترجمه‌ها
@@ -42,9 +44,6 @@ UI_TEXT = {
     "vad_on": ("حذف صدای اضافه هنگام سکوت (تشخیص صدا)",
                "Remove background noise in silence (Voice Detect)"),
     "meter_label": ("سطح صدا", "Sound Level"),
-    "st_stopped": ("وضعیت: غیرفعال", "Status: Inactive"),
-    "st_running": ("وضعیت: فعال — در حال پخش (تاخیر {ms} ms)",
-                   "Status: Active — playing (latency {ms} ms)"),
     "voice_talk": ("وضعیت: صحبت در حال تشخیص است", "Status: Voice detected"),
     "voice_silent": ("وضعیت: سکوت (نویز حذف شد)", "Status: Silence (noise removed)"),
     "voice_silent_off": ("وضعیت: سکوت", "Status: Silence"),
@@ -64,18 +63,18 @@ UI_TEXT = {
     ),
     "refreshing": ("در حال بروزرسانی لیست...", "Updating device list..."),
     "tip_about": ("راهنمایی", "Help"),
+    "link_github": ("ورود به صفحه گیتهاب", "Visit Github"),
     "tip_lang": ("تغییر زبان", "Change language"),
     "tip_refresh": ("بروزرسانی لیست دستگاه‌ها", "Update device list"),
     "tip_gate": ("هرچی عدد به صفر نزدیک‌تر باشد صدای پس‌زمینه بیشتر حذف می‌شود",
                  "The closer the value is to zero, the more background noise is removed."),
     "about_text": (
         "برای استفاده از نرم افزار برای بوست میکروفون در سیستم حتما به نرم افزار میکروفون مجازی "
-        "نیاز است که حتما یکبار نصب شود\n"
-        "«برای راهنمایی بیشتر وارد گیت هاب نرم افزار بشوید»",
+        "نیاز است که حتما یکبار نصب شود",
         "To use this app for boosting your microphone system-wide, a virtual microphone software "
-        "must be installed once.\n"
-        "\"For more guidance, visit the app's GitHub page.\"",
+        "must be installed once.",
     ),
+    "about_version": ("نسخه {}", "Version {}"),
     "close": ("بستن", "Close"),
 }
 
@@ -103,6 +102,7 @@ DEFAULT_CFG = {
     "vad_on": True,
     "volume": 0.9,
     "lang": "fa",
+    "exe_path": "",
 }
 
 
@@ -362,6 +362,17 @@ class AudioEngine:
 # --------------------------------------------------------------------------
 # انتخاب دستگاه‌های صوتی (فقط دستگاه‌های فعال)
 # --------------------------------------------------------------------------
+def _clean_env():
+    """کپی از محیط بدون متغیرهای PyInstaller (_PYI_*).
+
+    اگر نمونهٔ جدیدِ EXE متغیر _PYI_APPLICATION_HOME_DIR را از نمونهٔ در حال
+    خارج شدن به ارث ببرد، python312.dll را از همان پوشهٔ موقت _MEI... (در حال
+    پاک‌شدن) بار می‌کند و خطای «Failed to load Python DLL» رخ می‌دهد. با حذف این
+    متغیرها، نمونهٔ جدید پوشهٔ موقت خودش را می‌سازد.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("_PYI_")}
+
+
 def active_endpoint_names():
     """نام دستگاه‌های صوتی فعال (Status=OK) از کلاس AudioEndpoint ویندوز"""
     if hasattr(active_endpoint_names, "_cache"):
@@ -371,7 +382,9 @@ def active_endpoint_names():
         ps = ("Get-PnpDevice -Class AudioEndpoint -ErrorAction SilentlyContinue | "
               "ForEach-Object { $_.Status + \"`t\" + $_.FriendlyName }")
         r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                           capture_output=True, text=True, timeout=40)
+                           capture_output=True, text=True, timeout=40,
+                           creationflags=subprocess.CREATE_NO_WINDOW,
+                           env=_clean_env())
         for line in r.stdout.splitlines():
             parts = line.split("\t")
             if len(parts) >= 2 and parts[0].strip().upper() == "OK":
@@ -631,7 +644,6 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
         self.root.after(50, self._tick)
         self._restarting = False
-        self._refreshing = False
         self._setup_show_event()
 
     # --------------------------------------------------------------- ترجمه
@@ -657,11 +669,17 @@ class App:
         C_ACCENT2 = "#2563eb"
         C_OK = "#22c55e"
         C_BAD = "#ef4444"
+        self._col_text = C_TEXT
+        self._col_ok = C_OK
 
-        root.title(self._t("app_title"))
-        root.geometry("430x620")
-        root.minsize(400, 560)
+        root.title("Microphone Booster")
         root.configure(bg=C_BG)
+
+        # پس‌زمینه با المان‌های کمرنگ میکروفون/بلندگو (چیدمان دقیق در _layout_watermark)
+        self.bg_cv = tk.Canvas(root, bg=C_BG, highlightthickness=0)
+        self.bg_cv.place(x=0, y=0, relwidth=1, relheight=1)
+        # نوار عنوان ویندوز خاکستری تیره (Windows 11 DwmSetWindowAttribute)
+        self._apply_dark_titlebar()
 
         # استایل کلی
         style = ttk.Style(root)
@@ -714,18 +732,18 @@ class App:
 
         # --> سربرگ
         self.hdr = ttk.Frame(root, style="TCard.TFrame")
-        self.hdr.pack(fill="x", padx=10, pady=(10, 4))
+        self.hdr.pack(fill="x", padx=10, pady=(10, 12))
         self.hdr_title = ttk.Label(self.hdr, text=self._t("app_title"), style="Head.TLabel")
         self.hdr_lang = ttk.Button(self.hdr, style="Ghost.TButton", width=3, command=self.toggle_lang)
         self.hdr_lang.config(text=self._t("btn_lang"))
         self.btn_about = ttk.Button(self.hdr, style="Ghost.TButton", width=2, command=self._show_about)
         self.btn_about.config(text="?")
-        self.lbl_status = ttk.Label(self.hdr, style="CardAccent.TLabel")
         self._static.append((self.hdr_title, "app_title"))
 
         # --> کارت دستگاه
         dev = ttk.Frame(root, style="TCard.TFrame")
-        dev.pack(fill="x", padx=10, pady=4)
+        dev.pack(fill="x", padx=10, pady=(0, 12))
+        self.dev_card = dev
         self.dev_head = ttk.Frame(dev, style="TCard.TFrame")
         self.dev_head.grid(row=0, column=0, columnspan=2, sticky="ew")
         self.lbl_mic = ttk.Label(self.dev_head, style="CardDim.TLabel")
@@ -734,7 +752,6 @@ class App:
         self.btn_refresh = ttk.Button(self.dev_head, style="Refresh.TButton", width=2,
                                       command=self._on_refresh_devices)
         self.btn_refresh.config(text="↻")
-        self.lbl_upd = ttk.Label(dev, style="CardDim.TLabel")
         self.cb_in = ttk.Combobox(dev, width=38, state="readonly", style="DarkCombo.TCombobox")
         self.cb_out = ttk.Combobox(dev, width=38, state="readonly", style="DarkCombo.TCombobox")
         self.cb_in.grid(row=1, column=0, sticky="ew", padx=10)
@@ -749,7 +766,8 @@ class App:
 
         # --> کارت تنظیمات
         settings = ttk.Frame(root, style="TCard.TFrame")
-        settings.pack(fill="x", padx=10, pady=4)
+        settings.pack(fill="x", padx=10, pady=(0, 12))
+        self.settings_card = settings
         self.lbl_boost = ttk.Label(settings, style="CardDim.TLabel")
         self.lbl_gate = ttk.Label(settings, style="CardDim.TLabel")
         self.lbl_vol = ttk.Label(settings, style="CardDim.TLabel")
@@ -782,7 +800,8 @@ class App:
 
         # --> نشانگر سطح صدا
         meter_card = ttk.Frame(root, style="TCard.TFrame")
-        meter_card.pack(fill="x", padx=10, pady=4)
+        meter_card.pack(fill="x", padx=10, pady=(0, 12))
+        self.meter_card = meter_card
         self.lbl_meter = ttk.Label(meter_card, style="CardDim.TLabel")
         self.lbl_meter.pack(fill="x", padx=10, pady=(10, 0))
         self.meter_cv = tk.Canvas(meter_card, height=18, bg="#0c0c0e", highlightthickness=0)
@@ -798,7 +817,8 @@ class App:
 
         # --> دکمه‌ها
         btns = ttk.Frame(root, style="TCard.TFrame")
-        btns.pack(fill="x", padx=10, pady=4)
+        btns.pack(fill="x", padx=10, pady=(0, 12))
+        self.btns_card = btns
         self.btn_toggle = ttk.Button(btns, style="Accent.TButton", command=self.toggle_run)
         self.btn_tray = ttk.Button(btns, style="Ghost.TButton", command=self.hide_to_tray)
         self.btn_quit = ttk.Button(btns, style="Ghost.TButton", command=self.quit_app)
@@ -826,6 +846,8 @@ class App:
 
         root.bind("<Escape>", lambda e: self.hide_to_tray())
         root.update_idletasks()
+        self._layout_watermark()
+        self._autosize()
 
     def _btn_layout(self):
         rtl = self.lang == "fa"
@@ -843,15 +865,14 @@ class App:
         for w in (self.hdr_title, self.hdr_lang, self.btn_about):
             w.pack_forget()
         if rtl:
-            self.hdr_lang.pack(side="right", padx=(10, 6), pady=(10, 2))
-            self.btn_about.pack(side="right", padx=(0, 6), pady=(10, 2))
+            # فارسی: عنوان راست، دکمه راهنما/زبان چپ (آینه انگلیسی)
+            self.btn_about.pack(side="left", padx=(10, 6), pady=(10, 2))
+            self.hdr_lang.pack(side="left", padx=(0, 6), pady=(10, 2))
             self.hdr_title.pack(side="right", padx=(0, 6), pady=(10, 2))
         else:
             self.hdr_title.pack(side="left", padx=(12, 0), pady=(10, 2))
             self.btn_about.pack(side="right", padx=(0, 6), pady=(10, 2))
             self.hdr_lang.pack(side="right", padx=(0, 12), pady=(10, 2))
-        self.lbl_status.pack_forget()
-        self.lbl_status.pack(fill="x", anchor="e" if rtl else "w", padx=(12, 12), pady=(0, 10))
 
     def _apply_rtl(self):
         rtl = self.lang == "fa"
@@ -897,17 +918,15 @@ class App:
         self.lbl_vol.config(text=t_vol)
 
     def _refresh_status(self):
+        # بدون لیبل وضعیت؛ فقط رنگ نام نرم‌افزار نشان‌دهنده روشن/خاموش بودن است
         running = bool(self.engine and self.engine.running)
-        if running:
-            ms = getattr(self.engine, "latency_ms", None)
-            self.lbl_status.config(
-                text=self._t("st_running", ms=int(round(ms)) if ms else 0),
-                foreground="#22c55e")
-        else:
-            self.lbl_status.config(text=self._t("st_stopped"), foreground="#9a9aa2")
+        try:
+            self.hdr_title.config(foreground=self._col_ok if running else self._col_text)
+        except Exception:
+            pass
 
     def _refresh_ui(self):
-        self.root.title(self._t("app_title"))
+        self.root.title("Microphone Booster")
         for w, key in self._static:
             try:
                 w.config(text=self._t(key))
@@ -927,6 +946,7 @@ class App:
         self._apply_rtl()
         self._refresh_dynamic()
         self._refresh_status()
+        self._autosize()
 
     def toggle_lang(self):
         self.lang = "en" if self.lang == "fa" else "fa"
@@ -968,6 +988,15 @@ class App:
         self._refresh_ui()
         self._ready = True  # بازیابی تمام شد؛ از این به بعد اسلایدرها ذخیره می‌کنند
 
+        # کش کردن مسیر اجرایی فعلی برای راه‌اندازی مجدد هنگام بروزرسانی
+        if getattr(sys, "frozen", False):
+            try:
+                if not self.cfg.get("exe_path"):
+                    self.cfg["exe_path"] = os.path.realpath(sys.executable)
+                    save_cfg(self.cfg)
+            except Exception:
+                pass
+
     # ------------------------------------------------------ تغییر دستگاه‌ها
     def _on_dev_change(self, event=None):
         # وقتی ورودی/خروجی تغییر کرد: ذخیره کن و اگر پخش در حال اجراست دوباره راه‌اندازی شو
@@ -980,62 +1009,43 @@ class App:
         self._request_restart(changed)
 
     def _on_refresh_devices(self):
-        # رفرش لیست در یک ثرد جدا انجام میشود تا رابط کاربری فریز نشود
-        if self._refreshing:
-            return
-        self._refreshing = True
-        self.btn_refresh.config(state="disabled")
-        self.lbl_upd.config(text=self._t("refreshing"))
-        self.lbl_upd.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
-        threading.Thread(target=self._refresh_devices_worker, daemon=True).start()
-
-    def _refresh_devices_worker(self):
+        # بروزرسانی لیست دستگاه‌ها: برنامه کامل بسته شده و دوباره از اول اجرا می‌شود
+        frozen = getattr(sys, "frozen", False)
+        script = os.path.abspath(__file__)
         try:
-            if hasattr(active_endpoint_names, "_cache"):
-                del active_endpoint_names._cache
-            devs = list_devices()
+            if frozen:
+                # مسیر اجرایی فعلی در کش (config) ذخیره می‌شود تا نمونه جدید دقیقاً از همان
+                # مسیر بالا بیاید و خطای بارگذاری python312.dll از پوشه موقت رخ ندهد
+                saved = self.cfg.get("exe_path") or ""
+                exe = os.path.realpath(saved) if os.path.isfile(saved) \
+                    else os.path.realpath(sys.executable)
+                self.cfg["exe_path"] = exe
+                self._save()
+            else:
+                self._save()
+                exe = os.path.realpath(sys.executable)
         except Exception:
-            log_exc("_refresh_devices_worker")
-            devs = None
+            exe = os.path.realpath(sys.executable)
+            log_exc("_on_refresh_devices: save")
         try:
-            self.root.after(0, lambda: self._finish_refresh(devs))
+            wd = os.path.dirname(exe) or "."
+            if frozen:
+                # ریاستارت ترتیبی: صبر کن نمونهٔ قبلی کاملاً خارج شد (و پوشهٔ موقت _MEI آن
+                # حذف شد) تا نمونهٔ جدید extract کند؛ این کار خطای مقطعی «python312.dll
+                # یافت نشد» در هم‌پوشانی بالا آمدن/بسته‌شدن نمونه‌های onefile را حذف می‌کند.
+                ps = ("$p = Get-Process -Name 'Microphone Booster' -ErrorAction SilentlyContinue; "
+                      "while ($p) { Start-Sleep -Milliseconds 250; "
+                      "$p = Get-Process -Name 'Microphone Booster' -ErrorAction SilentlyContinue }; "
+                      f"Start-Process -FilePath '{exe}' -WorkingDirectory '{wd}'")
+            else:
+                ps = (f"Start-Sleep -Seconds 2; "
+                      f"Start-Process -FilePath '{exe}' -WorkingDirectory '{wd}' "
+                      f"-ArgumentList '{script}'")
+            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+                             creationflags=subprocess.CREATE_NO_WINDOW, env=_clean_env())
         except Exception:
-            pass
-
-    def _finish_refresh(self, devs):
-        # این تابع در نخ اصلی UI اجرا میشود
-        self._refreshing = False
-        self.btn_refresh.config(state="normal")
-        self.lbl_upd.grid_remove()
-        if devs is None:
-            return
-        try:
-            self.devices = devs
-            in_names = [d["name"] for d in devs["inputs"]]
-            out_names = [d["name"] for d in devs["outputs"]]
-            cur_in = self.cb_in.get()
-            cur_out = self.cb_out.get()
-            self.cb_in["values"] = in_names
-            self.cb_out["values"] = out_names
-            changed = False
-            if cur_in not in in_names:
-                p = pick_default(devs["inputs"], ["microphone"], devs["hostapis"], True)
-                cur_in = p["name"] if p else (in_names[0] if in_names else "")
-                changed = True
-            if cur_out not in out_names:
-                p = pick_default(devs["outputs"], ["headphones", "speakers", "speaker"],
-                                 devs["hostapis"], False)
-                cur_out = p["name"] if p else (out_names[0] if out_names else "")
-                changed = True
-            self.cb_in.set(cur_in)
-            self.cb_out.set(cur_out)
-            self.cfg["input"] = cur_in
-            self.cfg["output"] = cur_out
-            self._save()
-            log("device list refreshed -> inputs:", len(in_names), "outputs:", len(out_names))
-            self._request_restart(changed)
-        except Exception:
-            log_exc("_finish_refresh")
+            log_exc("_on_refresh_devices: restart")
+        self.quit_app()
 
     def _request_restart(self, changed):
         # اگر تغییری واقعی شد و پخش فعال بود، یک بار stop/start بزن تا اعمال شود
@@ -1337,6 +1347,93 @@ class App:
                 return p
         return None
 
+    def _mk_mic(self, x, y, s=1.0, target=None):
+        # کشیدن یک میکروفون کمرنگ روی کانواس (پیش‌فرض: کانواس پس‌زمینه)
+        fg = "#33373f"
+        c = target or self.bg_cv
+        w6 = max(3, int(6 * s))
+        w5 = max(3, int(5 * s))
+        c.create_line(x - 15 * s, y - 24 * s, x - 15 * s, y + 14 * s, fill=fg, width=w6)
+        c.create_line(x + 15 * s, y - 24 * s, x + 15 * s, y + 14 * s, fill=fg, width=w6)
+        c.create_arc(x - 15 * s, y - 24 * s, x + 15 * s, y + 6 * s, start=180, extent=-180,
+                     style="arc", outline=fg, width=w6)
+        c.create_arc(x - 15 * s, y + 6 * s, x + 15 * s, y + 36 * s, start=0, extent=-180,
+                     style="arc", outline=fg, width=w6)
+        c.create_line(x, y + 30 * s, x, y + 44 * s, fill=fg, width=w5)
+        c.create_arc(x - 13 * s, y + 37 * s, x + 13 * s, y + 63 * s, start=0, extent=-180,
+                     style="arc", outline=fg, width=w5)
+
+    def _mk_spk(self, x, y, s=1.0, target=None):
+        # کشیدن یک بلندگوی کمرنگ روی کانواس (پیش‌فرض: کانواس پس‌زمینه)
+        fg = "#33373f"
+        c = target or self.bg_cv
+        w5 = max(3, int(5 * s))
+        c.create_polygon(x - 30 * s, y - 18 * s, x - 30 * s, y + 18 * s, x - 14 * s, y,
+                         fill=fg, outline="")
+        c.create_rectangle(x - 2 * s, y - 13 * s, x + 12 * s, y + 13 * s, fill=fg, outline="")
+        c.create_arc(x + 12 * s, y - 22 * s, x + 42 * s, y + 22 * s, start=-55, extent=110,
+                     style="arc", outline=fg, width=w5)
+        c.create_arc(x + 24 * s, y - 35 * s, x + 56 * s, y + 35 * s, start=-55, extent=110,
+                     style="arc", outline=fg, width=w5)
+
+    def _autosize(self):
+        # ارتفاع پنجره = ارتفاع طبیعی محتوا (تا آخرین دکمه)؛ با تغییر اجزا هم همان‌قدر تغییر می‌کند
+        try:
+            self.root.update_idletasks()
+            w = self.root.winfo_reqwidth()
+            h = self.root.winfo_reqheight()
+            self.root.minsize(400, h)
+            self.root.geometry("%dx%d" % (max(400, w), h))
+        except Exception:
+            log_exc("_autosize")
+
+    def _layout_watermark(self):
+        # موقعیت کارت‌ها اندازه‌گیری می‌شود تا آیکون‌ها دقیقاً در شکاف‌ها و نوار پایین دیده شوند
+        try:
+            c = self.bg_cv
+            c.delete("all")
+            w = self.root.winfo_width() or 430
+            h = self.root.winfo_height() or 700
+            cards = []
+            for f in (self.hdr, self.dev_card, self.settings_card,
+                      self.meter_card, self.btns_card):
+                if f.winfo_ismapped():
+                    cards.append((int(f.winfo_y()), int(f.winfo_height())))
+            # آیکون‌های کوچک داخل شکاف‌های بین کارت‌ها
+            for i in range(len(cards) - 1):
+                y0 = cards[i][0] + cards[i][1]
+                y1 = cards[i + 1][0]
+                if y1 - y0 >= 10:
+                    gy = (y0 + y1) // 2
+                    self._mk_mic(int(w) - 12, gy, 0.5)
+                    self._mk_spk(10, gy, 0.4)
+            # آیکون‌های بزرگ در نوار خالی پایین پنجره
+            ylast = (cards[-1][0] + cards[-1][1]) if cards else int(h) - 1
+            band = int(h) - ylast
+            if band >= 30:
+                by = ylast + band // 2
+                self._mk_mic(int(w * 0.7), by, 1.2)
+                self._mk_spk(int(w * 0.25), by, 1.1)
+        except Exception:
+            log_exc("_layout_watermark")
+
+    def _apply_dark_titlebar(self):
+        # نوار عنوان خاکستری تیره با DwmSetWindowAttribute (فقط Windows 11+)
+        try:
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            user32.GetParent.argtypes = [wintypes.HWND]
+            user32.GetParent.restype = wintypes.HWND
+            hwnd = user32.GetParent(int(self.root.winfo_id()))
+            cap = 0x003a3631      # #31363a → COLORREF (BGR) برای نوار عنوان
+            txt = 0x00ffffff      # متن سفید روی نوار
+            bdr = 0x00221e1c      # رنگ حاشیه تیره
+            dwm = ctypes.windll.dwmapi
+            for attr, val in ((35, cap), (36, txt), (34, bdr)):
+                dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(ctypes.c_uint32(val)), 4)
+        except Exception:
+            log_exc("_apply_dark_titlebar")
+
     def _set_window_icon(self):
         # آیکون پنجره و تسکبار را به آیکون خود برنامه تنظیم می‌کند (نه آیکون پیش‌فرض Tk)
         p = self._icon_path()
@@ -1357,15 +1454,22 @@ class App:
     def _show_about(self, event=None):
         card = "#1e2024"
         dlg = tk.Toplevel(self.root)
-        dlg.title(self._t("app_title"))
+        dlg.title("Microphone Booster")
         dlg.configure(bg=card)
         dlg.resizable(False, False)
         dlg.transient(self.root)
         dlg.grab_set()
         tk.Label(dlg, text="Made By N2VID", bg=card, fg="#e5e7eb",
                  font=("Segoe UI", 13, "bold")).pack(padx=24, pady=(16, 8))
+        tk.Label(dlg, text=self._t("about_version").format(APP_VERSION), bg=card, fg="#9ca3af",
+                 font=("Segoe UI", 10)).pack(padx=24, pady=(0, 6))
         tk.Label(dlg, text=self._t("about_text"), bg=card, fg="#a1a1aa",
                  justify="center", wraplength=420, font=("Segoe UI", 11)).pack(padx=24, pady=0)
+        # لینک کلیک‌شونده به گیت‌هاب
+        link = tk.Label(dlg, text=self._t("link_github"), bg=card, fg="#60a5fa",
+                        cursor="hand2", font=("Segoe UI", 11, "underline"))
+        link.pack(padx=24, pady=(10, 0))
+        link.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/N2VID/Microphone_Booster"))
         ttk.Button(dlg, style="Accent.TButton", text=self._t("close"),
                    command=dlg.destroy).pack(pady=(14, 14))
 

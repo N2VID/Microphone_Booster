@@ -68,6 +68,8 @@ Free to use. Made by **N2VID**.
 
 ---
 
+<div dir="rtl" lang="fa">
+
 ## فارسی
 <a class="button"
        href="https://github.com/N2VID/Microphone_Booster/releases">
@@ -115,3 +117,5 @@ pyinstaller --noconfirm --onefile --windowed --name "Microphone Booster" --icon 
 ## ساخته‌شده توسط
 
 **N2VID**
+
+</div>
