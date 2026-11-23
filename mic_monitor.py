@@ -19,6 +19,7 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
+import winreg
 from tkinter import messagebox, ttk
 
 import numpy as np
@@ -28,7 +29,7 @@ from PIL import Image, ImageDraw
 
 APP_NAME = "Microphone Booster"
 APP_TITLE = "Microphone Booster"
-APP_VERSION = "1.6.22"
+APP_VERSION = "1.6.63"
 
 # --------------------------------------------------------------------------
 # ترجمه‌ها
@@ -56,6 +57,8 @@ UI_TEXT = {
     "btn_lang": ("EN", "FA"),
     "err_title": ("خطا", "Error"),
     "err_sound": ("خطای صوتی", "Audio error"),
+    "err_startup": ("نمی‌توان تنظیم اجرای خودکار ویندوز را تغییر داد.",
+                    "Could not update the Windows startup setting."),
     "already": (
             "نرم افزار Microphone Booster از قبل در حال اجرا است.\n"
         "از پنجره ی قبلی یا آیکون نوار وظیفه استفاده کنید.",
@@ -66,6 +69,10 @@ UI_TEXT = {
     "link_github": ("ورود به صفحه گیتهاب", "Visit Github"),
     "tip_lang": ("تغییر زبان", "Change language"),
     "tip_refresh": ("بروزرسانی لیست دستگاه‌ها", "Update device list"),
+    "settings": ("تنظیمات", "Settings"),
+    "tip_settings": ("تنظیمات", "Settings"),
+    "run_at_startup": ("باز شدن نرم افزار هنگام اجرای ویندوز", "Run app at Windows startup"),
+    "auto_start": ("هنگام باز شدن نرم افزار خودکار روشن باشد", "Auto-start playback when app opens"),
     "tip_gate": ("هرچی عدد به صفر نزدیک‌تر باشد صدای پس‌زمینه بیشتر حذف می‌شود",
                  "The closer the value is to zero, the more background noise is removed."),
     "about_text": (
@@ -103,6 +110,8 @@ DEFAULT_CFG = {
     "volume": 0.9,
     "lang": "fa",
     "exe_path": "",
+    "run_at_startup": False,
+    "auto_start": False,
 }
 
 
@@ -170,13 +179,14 @@ _SHOW_EVENT_NAME = "Local\\MicrophoneBooster_ShowEvent"
 _SINGLE_INSTANCE_MUTEX = "Local\\MicrophoneBooster_SingleInstance"
 
 
-def acquire_single_instance():
+def acquire_single_instance(show_existing=True):
     global _MUTEX_HANDLE
     try:
         _MUTEX_HANDLE = ctypes.windll.kernel32.CreateMutexW(None, False, _SINGLE_INSTANCE_MUTEX)
         err = ctypes.windll.kernel32.GetLastError()
         if err == 183:  # ERROR_ALREADY_EXISTS → نمونه دیگری در حال اجراست
-            _signal_show_existing()
+            if show_existing:
+                _signal_show_existing()
             return False
         return True
     except Exception:
@@ -194,6 +204,51 @@ def _signal_show_existing():
                 ctypes.windll.kernel32.CloseHandle(ev)
             return
         time.sleep(0.05)
+
+
+# --------------------------------------------------------------------------
+# اجرای خودکار هنگام بالا آمدن ویندوز
+# --------------------------------------------------------------------------
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_RUN_VALUE = APP_NAME
+
+
+def startup_command():
+    """دستوری که در Run ویندوز ذخیره میشود (همیشه در حالت tray اجرا شود)"""
+    if getattr(sys, "frozen", False):
+        return f'"{os.path.realpath(sys.executable)}" --autostart'
+    script = os.path.abspath(__file__)
+    return f'"{sys.executable}" "{script}" --autostart'
+
+
+def startup_enabled():
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, _RUN_VALUE)
+        return bool(value)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        log_exc("startup_enabled")
+        return False
+
+
+def set_startup(enabled):
+    """درج/حذف کلید Run کاربر؛ در صورت موفقیت True برمیگرداند"""
+    try:
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, _RUN_KEY,
+                                0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                winreg.SetValueEx(key, _RUN_VALUE, 0, winreg.REG_SZ, startup_command())
+            else:
+                try:
+                    winreg.DeleteValue(key, _RUN_VALUE)
+                except FileNotFoundError:
+                    pass
+        return True
+    except OSError:
+        log_exc("set_startup")
+        return False
 
 
 # --------------------------------------------------------------------------
@@ -558,6 +613,79 @@ class SquareCheck:
             self.lbl.pack(side="left", padx=(8, 2))
 
 
+class ToggleSwitch:
+    """سوییچ روشن/خاموش کوچک با رنگ قابل تنظیم"""
+
+    def __init__(self, parent, text="", checked=False, on_toggle=None,
+                 on_color="#2563eb", off_color="#3a3f46", outline="#4b5563",
+                 knob_on="#ffffff", knob_off="#9ca3af", tick_color="#2563eb",
+                 bg="#1e2024"):
+        self._checked = bool(checked)
+        self.on_toggle = on_toggle
+        self.on_color = on_color
+        self.off_color = off_color
+        self.outline = outline
+        self.knob_on = knob_on
+        self.knob_off = knob_off
+        self.tick_color = tick_color
+        self.frame = ttk.Frame(parent, style="TCard.TFrame")
+        self.cv = tk.Canvas(self.frame, width=44, height=24, bg=bg,
+                            highlightthickness=0, bd=0)
+        self.lbl = ttk.Label(self.frame, text=text, style="Card.TLabel")
+        self.cv.bind("<Button-1>", self._click)
+        self.lbl.bind("<Button-1>", self._click)
+        self._draw()
+        self.set_rtl(False)
+
+    def _click(self, event=None):
+        self._checked = not self._checked
+        self._draw()
+        if self.on_toggle:
+            try:
+                self.on_toggle()
+            except Exception:
+                log_exc("ToggleSwitch.on_toggle")
+
+    def _draw(self):
+        c = self.cv
+        c.delete("all")
+        if self._checked:
+            fill, knob, kx, outline = self.on_color, self.knob_on, 34, self.outline
+        else:
+            fill, knob, kx, outline = self.off_color, self.knob_off, 10, self.outline
+        c.create_rectangle(8, 3, 36, 21, fill=fill, outline=outline, width=1)
+        c.create_oval(2, 3, 20, 21, fill=fill, outline=outline, width=1)
+        c.create_oval(24, 3, 42, 21, fill=fill, outline=outline, width=1)
+        c.create_oval(kx - 8, 4, kx + 8, 20, fill=knob, outline="")
+        if self._checked:
+            c.create_line(kx - 4, 12, kx - 1, 15, kx + 4, 8,
+                          fill=self.tick_color, width=2,
+                          capstyle=tk.ROUND, joinstyle=tk.ROUND)
+
+    def get(self):
+        return self._checked
+
+    def set(self, value):
+        self._checked = bool(value)
+        self._draw()
+
+    def config(self, **kw):
+        if "text" in kw:
+            self.lbl.config(text=kw.pop("text"))
+        if kw:
+            self.lbl.config(**kw)
+
+    def set_rtl(self, rtl):
+        self.cv.pack_forget()
+        self.lbl.pack_forget()
+        if rtl:
+            self.cv.pack(side="right", padx=(0, 2))
+            self.lbl.pack(side="right", padx=(2, 8))
+        else:
+            self.cv.pack(side="left", padx=(2, 0))
+            self.lbl.pack(side="left", padx=(8, 2))
+
+
 class ToolTip:
     """نکته نمایشی (tooltip) ساده: با بردن موس روی ویجت، متن کنار موس ظاهر می‌شود"""
 
@@ -568,8 +696,8 @@ class ToolTip:
         self._tip = None
         self._after_id = None
         widget.bind("<Enter>", self._schedule_on_enter, add="+")
-        widget.bind("<Leave>", self._hide)
-        widget.bind("<ButtonPress>", self._hide)
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
 
     def set_text(self, text):
         self.text = text
@@ -618,8 +746,9 @@ class ToolTip:
 
 
 class App:
-    def __init__(self, root):
+    def __init__(self, root, autostart=False):
         self.root = root
+        self.autostart = bool(autostart)
         self.cfg = load_cfg()
         self.lang = "fa" if self.cfg.get("lang", "fa") not in ("en", "fa") else self.cfg.get("lang", "fa")
         self.engine = None
@@ -645,6 +774,10 @@ class App:
         self.root.after(50, self._tick)
         self._restarting = False
         self._setup_show_event()
+        if self.autostart:
+            self.hide_to_tray()
+        if self.cfg.get("auto_start"):
+            self._start_async()
 
     # --------------------------------------------------------------- ترجمه
     def _t(self, key, **fmt):
@@ -661,7 +794,7 @@ class App:
     def _build_ui(self):
         self._set_window_icon()
         root = self.root
-        C_BG = "#17181b"
+        C_BG = "#000000"
         C_CARD = "#1e2024"
         C_TEXT = "#e8e8ea"
         C_DIM = "#9a9aa2"
@@ -675,10 +808,7 @@ class App:
         root.title("Microphone Booster")
         root.configure(bg=C_BG)
 
-        # پس‌زمینه با المان‌های کمرنگ میکروفون/بلندگو (چیدمان دقیق در _layout_watermark)
-        self.bg_cv = tk.Canvas(root, bg=C_BG, highlightthickness=0)
-        self.bg_cv.place(x=0, y=0, relwidth=1, relheight=1)
-        # نوار عنوان ویندوز خاکستری تیره (Windows 11 DwmSetWindowAttribute)
+        # نوار عنوان مشکی (Windows 11 DwmSetWindowAttribute)
         self._apply_dark_titlebar()
 
         # استایل کلی
@@ -696,7 +826,7 @@ class App:
         style.configure("Accent.TLabel", background=C_CARD, foreground=C_ACCENT, font=("Segoe UI", 10, "bold"))
         style.configure("CardAccent.TLabel", background=C_CARD, foreground=C_ACCENT, font=("Segoe UI", 10, "bold"))
         style.configure("Accent.TButton", background=C_ACCENT, foreground="#ffffff",
-                        font=("Segoe UI", 11, "bold"), borderwidth=0, padding=(12, 8))
+                        font=("Segoe UI", 12, "bold"), borderwidth=0, padding=(12, 10))
         style.map("Accent.TButton",
                   background=[("active", C_ACCENT2), ("disabled", "#3b3b3f")],
                   foreground=[("disabled", "#999")])
@@ -819,20 +949,52 @@ class App:
         btns = ttk.Frame(root, style="TCard.TFrame")
         btns.pack(fill="x", padx=10, pady=(0, 12))
         self.btns_card = btns
-        self.btn_toggle = ttk.Button(btns, style="Accent.TButton", command=self.toggle_run)
+        self.play_row = ttk.Frame(btns, style="TCard.TFrame")
+        self.play_row.grid(row=0, column=0, columnspan=2, sticky="ew",
+                           padx=10, pady=(10, 6))
+        self.btn_toggle = ttk.Button(self.play_row, style="Accent.TButton",
+                                     command=self.toggle_run)
+        self.btn_settings = tk.Canvas(self.play_row, width=40, height=40,
+                                      bg="#1e40af", highlightthickness=0,
+                                      bd=0, cursor="hand2")
+        self.btn_settings.create_text(20, 20, text="⚙", fill="#ffffff",
+                                      font=("Segoe UI", 18))
+        self.btn_settings.bind("<Button-1>", lambda e: self._toggle_settings())
+        self.btn_settings.bind("<Enter>",
+                               lambda e: self.btn_settings.configure(bg="#2563eb"))
+        self.btn_settings.bind("<Leave>",
+                               lambda e: self.btn_settings.configure(bg="#1e40af"))
         self.btn_tray = ttk.Button(btns, style="Ghost.TButton", command=self.hide_to_tray)
         self.btn_quit = ttk.Button(btns, style="Ghost.TButton", command=self.quit_app)
         self.btn_test = ttk.Button(btns, style="Ghost.TButton", command=self.test_sound)
-        self.btn_toggle.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 6))
-        self.btn_quit.grid(row=1, column=0, sticky="ew", padx=(10, 5), pady=(0, 6))
-        self.btn_tray.grid(row=1, column=1, sticky="ew", padx=(5, 10), pady=(0, 6))
-        self.btn_test.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10))
         btns.columnconfigure(0, weight=1)
         btns.columnconfigure(1, weight=1)
+        self._btn_layout()
+
+        # کارت تنظیمات پنهان؛ با دکمه چرخدنده باز/بسته میشود
+        settings_box = ttk.Frame(root, style="TCard.TFrame")
+        self.options_card = settings_box
+        self.lbl_settings = ttk.Label(settings_box, text=self._t("settings"), style="Card.TLabel")
+        self.lbl_settings.pack(fill="x", padx=10, pady=(10, 4))
+        self.sw_run_startup = ToggleSwitch(
+            settings_box, text=self._t("run_at_startup"),
+            on_toggle=self._on_run_startup,
+            on_color="#2563eb", tick_color="#2563eb")
+        self.sw_run_startup.frame.pack(fill="x", padx=10, pady=(4, 6))
+        self.sw_auto_start = ToggleSwitch(
+            settings_box, text=self._t("auto_start"),
+            on_toggle=self._on_auto_start,
+            on_color="#2563eb", tick_color="#2563eb")
+        self.sw_auto_start.frame.pack(fill="x", padx=10, pady=(0, 10))
+        self._switches = (self.sw_run_startup, self.sw_auto_start)
         self._static.append((self.btn_toggle, "btn_toggle_start"))
         self._static.append((self.btn_tray, "btn_tray"))
         self._static.append((self.btn_quit, "btn_quit"))
         self._static.append((self.btn_test, "btn_test"))
+        self._static.append((self.lbl_settings, "settings"))
+        self._static.append((self.sw_run_startup, "run_at_startup"))
+        self._static.append((self.sw_auto_start, "auto_start"))
+        self._mirror_pack.append(self.lbl_settings)
 
         # فهرست دستگاه‌ها
         self.cb_in["values"] = [d["name"] for d in self.devices["inputs"]]
@@ -843,19 +1005,26 @@ class App:
         self.tip_lang = ToolTip(self.hdr_lang,
                                 "تغییر زبان" if self.lang == "en" else "Change Language", root)
         self.tip_refresh = ToolTip(self.btn_refresh, self._t("tip_refresh"), root)
+        self.tip_settings = ToolTip(self.btn_settings, self._t("tip_settings"), root)
 
         root.bind("<Escape>", lambda e: self.hide_to_tray())
         root.update_idletasks()
-        self._layout_watermark()
         self._autosize()
 
     def _btn_layout(self):
         rtl = self.lang == "fa"
-        self.btn_toggle.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 6))
         if rtl:
+            self.play_row.columnconfigure(0, weight=0)
+            self.play_row.columnconfigure(1, weight=1)
+            self.btn_settings.grid(row=0, column=0)
+            self.btn_toggle.grid(row=0, column=1, sticky="ew")
             self.btn_tray.grid(row=1, column=0, sticky="ew", padx=(10, 5), pady=(0, 6))
             self.btn_quit.grid(row=1, column=1, sticky="ew", padx=(5, 10), pady=(0, 6))
         else:
+            self.play_row.columnconfigure(0, weight=1)
+            self.play_row.columnconfigure(1, weight=0)
+            self.btn_toggle.grid(row=0, column=0, sticky="ew")
+            self.btn_settings.grid(row=0, column=1)
             self.btn_quit.grid(row=1, column=0, sticky="ew", padx=(10, 5), pady=(0, 6))
             self.btn_tray.grid(row=1, column=1, sticky="ew", padx=(5, 10), pady=(0, 6))
         self.btn_test.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10))
@@ -886,6 +1055,8 @@ class App:
             w.pack(fill="x")
         self.chk_gate.set_rtl(rtl)
         self.chk_vad.set_rtl(rtl)
+        for sw in self._switches:
+            sw.set_rtl(rtl)
         self._layout_dev_head()
 
     def _layout_dev_head(self):
@@ -938,6 +1109,7 @@ class App:
         # نکته دکمه زبان همیشه به زبانی است که فعلاً فعال نیست (زبان مقصد)
         self.tip_lang.set_text("تغییر زبان" if self.lang == "en" else "Change Language")
         self.tip_refresh.set_text(self._t("tip_refresh"))
+        self.tip_settings.set_text(self._t("tip_settings"))
         self.btn_toggle.config(
             text=self._t("btn_toggle_stop") if (self.engine and self.engine.running)
             else self._t("btn_toggle_start"))
@@ -984,6 +1156,12 @@ class App:
         self.sc_vol.set(c["volume"])
         self.chk_gate.set(bool(c.get("gate_on", False)))
         self.chk_vad.set(bool(c.get("vad_on", False)))
+        startup_on = startup_enabled()
+        self.cfg["run_at_startup"] = startup_on
+        self.sw_run_startup.set(startup_on)
+        self.sw_auto_start.set(bool(c.get("auto_start", False)))
+        if startup_on:
+            set_startup(True)  # مسیر EXE جابهجا شده را دوباره مینویسیم
         self._refresh_dynamic()
         self._refresh_ui()
         self._ready = True  # بازیابی تمام شد؛ از این به بعد اسلایدرها ذخیره می‌کنند
@@ -1096,6 +1274,29 @@ class App:
         if self.engine:
             self.engine.gate_on = self.chk_gate.get()
             self.engine.vad_on = self.chk_vad.get()
+        self._save()
+
+    def _toggle_settings(self):
+        # کارت تنظیمات را باز/بسته میکند بدون اینکه عرض پنجره عوض شود
+        if self.options_card.winfo_ismapped():
+            self.options_card.pack_forget()
+        else:
+            self.options_card.pack(fill="x", padx=10, pady=(0, 12))
+        self.root.update_idletasks()
+        self._autosize()
+
+    def _on_run_startup(self):
+        enabled = self.sw_run_startup.get()
+        if not set_startup(enabled):
+            self.sw_run_startup.set(not enabled)
+            messagebox.showerror(self._t("err_title"), self._t("err_startup"),
+                                 parent=self.root)
+            return
+        self.cfg["run_at_startup"] = enabled
+        self._save()
+
+    def _on_auto_start(self):
+        self.cfg["auto_start"] = self.sw_auto_start.get()
         self._save()
 
     def _on_vol(self, v):
@@ -1347,35 +1548,6 @@ class App:
                 return p
         return None
 
-    def _mk_mic(self, x, y, s=1.0, target=None):
-        # کشیدن یک میکروفون کمرنگ روی کانواس (پیش‌فرض: کانواس پس‌زمینه)
-        fg = "#33373f"
-        c = target or self.bg_cv
-        w6 = max(3, int(6 * s))
-        w5 = max(3, int(5 * s))
-        c.create_line(x - 15 * s, y - 24 * s, x - 15 * s, y + 14 * s, fill=fg, width=w6)
-        c.create_line(x + 15 * s, y - 24 * s, x + 15 * s, y + 14 * s, fill=fg, width=w6)
-        c.create_arc(x - 15 * s, y - 24 * s, x + 15 * s, y + 6 * s, start=180, extent=-180,
-                     style="arc", outline=fg, width=w6)
-        c.create_arc(x - 15 * s, y + 6 * s, x + 15 * s, y + 36 * s, start=0, extent=-180,
-                     style="arc", outline=fg, width=w6)
-        c.create_line(x, y + 30 * s, x, y + 44 * s, fill=fg, width=w5)
-        c.create_arc(x - 13 * s, y + 37 * s, x + 13 * s, y + 63 * s, start=0, extent=-180,
-                     style="arc", outline=fg, width=w5)
-
-    def _mk_spk(self, x, y, s=1.0, target=None):
-        # کشیدن یک بلندگوی کمرنگ روی کانواس (پیش‌فرض: کانواس پس‌زمینه)
-        fg = "#33373f"
-        c = target or self.bg_cv
-        w5 = max(3, int(5 * s))
-        c.create_polygon(x - 30 * s, y - 18 * s, x - 30 * s, y + 18 * s, x - 14 * s, y,
-                         fill=fg, outline="")
-        c.create_rectangle(x - 2 * s, y - 13 * s, x + 12 * s, y + 13 * s, fill=fg, outline="")
-        c.create_arc(x + 12 * s, y - 22 * s, x + 42 * s, y + 22 * s, start=-55, extent=110,
-                     style="arc", outline=fg, width=w5)
-        c.create_arc(x + 24 * s, y - 35 * s, x + 56 * s, y + 35 * s, start=-55, extent=110,
-                     style="arc", outline=fg, width=w5)
-
     def _autosize(self):
         # ارتفاع پنجره = ارتفاع طبیعی محتوا (تا آخرین دکمه)؛ با تغییر اجزا هم همان‌قدر تغییر می‌کند
         try:
@@ -1387,36 +1559,6 @@ class App:
         except Exception:
             log_exc("_autosize")
 
-    def _layout_watermark(self):
-        # موقعیت کارت‌ها اندازه‌گیری می‌شود تا آیکون‌ها دقیقاً در شکاف‌ها و نوار پایین دیده شوند
-        try:
-            c = self.bg_cv
-            c.delete("all")
-            w = self.root.winfo_width() or 430
-            h = self.root.winfo_height() or 700
-            cards = []
-            for f in (self.hdr, self.dev_card, self.settings_card,
-                      self.meter_card, self.btns_card):
-                if f.winfo_ismapped():
-                    cards.append((int(f.winfo_y()), int(f.winfo_height())))
-            # آیکون‌های کوچک داخل شکاف‌های بین کارت‌ها
-            for i in range(len(cards) - 1):
-                y0 = cards[i][0] + cards[i][1]
-                y1 = cards[i + 1][0]
-                if y1 - y0 >= 10:
-                    gy = (y0 + y1) // 2
-                    self._mk_mic(int(w) - 12, gy, 0.5)
-                    self._mk_spk(10, gy, 0.4)
-            # آیکون‌های بزرگ در نوار خالی پایین پنجره
-            ylast = (cards[-1][0] + cards[-1][1]) if cards else int(h) - 1
-            band = int(h) - ylast
-            if band >= 30:
-                by = ylast + band // 2
-                self._mk_mic(int(w * 0.7), by, 1.2)
-                self._mk_spk(int(w * 0.25), by, 1.1)
-        except Exception:
-            log_exc("_layout_watermark")
-
     def _apply_dark_titlebar(self):
         # نوار عنوان خاکستری تیره با DwmSetWindowAttribute (فقط Windows 11+)
         try:
@@ -1425,9 +1567,9 @@ class App:
             user32.GetParent.argtypes = [wintypes.HWND]
             user32.GetParent.restype = wintypes.HWND
             hwnd = user32.GetParent(int(self.root.winfo_id()))
-            cap = 0x003a3631      # #31363a → COLORREF (BGR) برای نوار عنوان
+            cap = 0x00000000      # مشکی کامل برای نوار عنوان
             txt = 0x00ffffff      # متن سفید روی نوار
-            bdr = 0x00221e1c      # رنگ حاشیه تیره
+            bdr = 0x00000000      # حاشیه مشکی
             dwm = ctypes.windll.dwmapi
             for attr, val in ((35, cap), (36, txt), (34, bdr)):
                 dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(ctypes.c_uint32(val)), 4)
@@ -1640,11 +1782,14 @@ def main():
         if "--test" in sys.argv:
             run_test()
             return
-        if not acquire_single_instance():
-            log("another instance is already running; requested show & exiting")
+        autostart = "--autostart" in sys.argv
+        if not acquire_single_instance(show_existing=not autostart):
+            log("another instance is already running; exiting")
             return
         root = tk.Tk()
-        app = App(root)
+        if autostart:
+            root.withdraw()
+        app = App(root, autostart=autostart)
         root.mainloop()
     except Exception:
         log_exc("unhandled error in main")
